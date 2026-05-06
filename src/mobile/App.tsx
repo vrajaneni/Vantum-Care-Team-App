@@ -99,6 +99,13 @@ const nuviaKnowledge = [
   { id: 'k3', category: 'operations', title: 'Shift Handover Checklist', body: 'Highlight abnormal labs, pending follow-up, unresolved tasks, and next outreach owners before shift close.', tags: ['handover', 'tasks', 'ops'] },
 ];
 
+type NuviaMessage = {
+  id: string;
+  role: 'assistant' | 'user';
+  text: string;
+  citations?: string[];
+};
+
 const rpmPrograms = [
   {
     id: 'chf',
@@ -481,6 +488,26 @@ export default function App() {
   const [nuviaMode, setNuviaMode] = useState<'chat' | 'proactive' | 'tasks' | 'knowledge'>('chat');
   const [nuviaInput, setNuviaInput] = useState('');
   const [nuviaKnowledgeSearch, setNuviaKnowledgeSearch] = useState('');
+  const [nuviaMessages, setNuviaMessages] = useState<NuviaMessage[]>([
+    {
+      id: 'nuvia-m1',
+      role: 'assistant',
+      text: 'Good morning, Dr. Richardson. I analyzed overnight data and flagged three patients for immediate review.',
+      citations: ['JNC 8 Guidelines', 'CMS CCM Requirements'],
+    },
+    {
+      id: 'nuvia-m2',
+      role: 'user',
+      text: 'Show me the highest-priority outreach and any billing actions I should complete first.',
+    },
+    {
+      id: 'nuvia-m3',
+      role: 'assistant',
+      text: 'Start with John Doe for CHF outreach, then complete the remaining RPM and CCM qualification work. I also flagged one abnormal lab and one shift handoff item.',
+      citations: ['RPM Alert Review', 'Billing Qualification Engine'],
+    },
+  ]);
+  const [isNuviaThinking, setIsNuviaThinking] = useState(false);
   const [expandedRpmProgram, setExpandedRpmProgram] = useState('chf');
   const [isNuviaRecording, setIsNuviaRecording] = useState(false);
   const [nuviaVoiceError, setNuviaVoiceError] = useState('');
@@ -741,6 +768,147 @@ export default function App() {
     setActiveTab('telehealth');
     setIsTelehealthActive(true);
     setShowMore(false);
+  };
+
+  const pushNuviaAssistantMessage = (text: string, citations?: string[]) => {
+    setNuviaMessages((current) => [
+      ...current,
+      { id: `nuvia-${Date.now()}-${current.length}`, role: 'assistant', text, citations },
+    ]);
+  };
+
+  const buildNuviaResponse = (prompt: string) => {
+    const query = prompt.toLowerCase();
+
+    if (query.includes('billing') || query.includes('claim') || query.includes('cms')) {
+      return {
+        text: 'RPM 99457 for John Doe still needs 5 more minutes, and Jane Smith still needs CCM care-plan work before 99490 qualifies. Open Billing & Claims next to clear those gaps.',
+        citations: ['CMS Qualification Engine', 'Billing Workflow'],
+      };
+    }
+
+    if (query.includes('lab')) {
+      return {
+        text: 'The most urgent lab follow-up is Robert Wilson’s elevated LDL trend, with John Doe’s metabolic panel also needing review. I can take you straight to Lab Reports if you want to drill in.',
+        citations: ['Lab Reports', 'Nuvia AI Analysis'],
+      };
+    }
+
+    if (query.includes('rpm') || query.includes('remote')) {
+      return {
+        text: 'CHF and hypertension are driving the highest RPM risk right now. John Doe has weight gain with elevated blood pressure, and Sarah Jenkins still needs adherence follow-up.',
+        citations: ['RPM Monitoring', 'Patient Risk Signals'],
+      };
+    }
+
+    if (query.includes('visit') || query.includes('schedule') || query.includes('telehealth')) {
+      return {
+        text: 'Your next telehealth priorities are John Doe in the ready queue and Robert Wilson for follow-up scheduling. I recommend moving into Visit to start or schedule those encounters.',
+        citations: ['Visit Schedule', 'Waiting Room'],
+      };
+    }
+
+    if (query.includes('handoff') || query.includes('shift')) {
+      return {
+        text: 'The current handoff still needs abnormal lab review for Sarah Jenkins and outreach follow-up for John Doe. Shift Summary has the full pending handoff list and the AI brief.',
+        citations: ['Shift Summary', 'Handoff Checklist'],
+      };
+    }
+
+    return {
+      text: 'I can help with outreach, billing qualification, labs, RPM, or visit scheduling. Ask for a workflow, or tap one of the proactive cards to jump directly into that module.',
+      citations: ['Nuvia Co-Pilot'],
+    };
+  };
+
+  const handleNuviaSend = () => {
+    const prompt = nuviaInput.trim();
+    if (!prompt || isNuviaThinking) return;
+
+    setNuviaMode('chat');
+    setNuviaVoiceError('');
+    setNuviaMessages((current) => [...current, { id: `nuvia-${Date.now()}`, role: 'user', text: prompt }]);
+    setNuviaInput('');
+    setIsNuviaThinking(true);
+
+    const response = buildNuviaResponse(prompt);
+    setTimeout(() => {
+      pushNuviaAssistantMessage(response.text, response.citations);
+      setIsNuviaThinking(false);
+    }, 350);
+  };
+
+  const handleNuviaAlertAction = (alertId: string) => {
+    setNuviaMode('chat');
+    if (alertId === '1') {
+      setBillingProgramFilter('CCM');
+      setBillingStatusFilter('In Progress');
+      navigate('billing');
+      pushNuviaAssistantMessage(
+        'Opened Billing & Claims with CCM items that still need time and documentation before submission.',
+        ['CMS Qualification Engine'],
+      );
+      return;
+    }
+
+    if (alertId === '2') {
+      const report = labReportCards.find((item) => item.status === 'Critical') ?? labReportCards[0];
+      setLabsStatusFilter(report?.status ?? 'Abnormal');
+      if (report) {
+        setLabsPatientFilter(report.patientId);
+        setSelectedLabReport(report);
+      }
+      navigate('labs');
+      pushNuviaAssistantMessage(
+        `Opened Lab Reports for ${report?.patientName ?? 'the flagged patient'} so you can review the abnormal results immediately.`,
+        ['Lab Reports', 'Nuvia AI Analysis'],
+      );
+      return;
+    }
+
+    setShiftTab('current');
+    navigate('shift-summary');
+    pushNuviaAssistantMessage(
+      'Opened Shift Summary so you can review the handoff notes, suggested tasks, and pending follow-up before the next shift.',
+      ['Shift Handover Checklist'],
+    );
+  };
+
+  const handleNuviaTaskAction = (taskId: string) => {
+    if (taskId === 't1') {
+      openPatient('1');
+      pushNuviaAssistantMessage(
+        'I opened John Doe so you can draft the note with the latest patient context, RPM trends, and care actions in view.',
+        ['Patient Care Workspace'],
+      );
+      return;
+    }
+
+    if (taskId === 't2') {
+      setBillingProgramFilter('RPM');
+      setBillingStatusFilter('In Progress');
+      navigate('billing');
+      pushNuviaAssistantMessage(
+        'Billing & Claims is open with RPM items filtered to in-progress so you can finish the remaining qualification work.',
+        ['Billing Qualification Engine'],
+      );
+      return;
+    }
+
+    navigate('messages');
+    pushNuviaAssistantMessage(
+      'Messages is open so you can complete the patient outreach workflow and capture follow-up directly from the conversation thread.',
+      ['Patient Messaging'],
+    );
+  };
+
+  const handleNuviaKnowledgeAction = (knowledgeId: string) => {
+    const article = nuviaKnowledge.find((item) => item.id === knowledgeId);
+    if (!article) return;
+    setNuviaMode('chat');
+    setNuviaInput(`Summarize ${article.title} for today's workflow.`);
+    pushNuviaAssistantMessage(article.body, [article.title]);
+    nuviaInputRef.current?.focus();
   };
 
   const toggleTask = (taskId: string) => {
@@ -1139,20 +1307,28 @@ export default function App() {
 
           {nuviaMode === 'chat' && (
             <View style={styles.nuviaPanel}>
-              <View style={styles.nuviaAssistantBubble}>
-                <Text style={styles.nuviaBubbleText}>
-                  Good morning, Dr. Richardson. I analyzed overnight data and flagged three patients for immediate review.
-                </Text>
-                <View style={styles.nuviaCitationRow}>
-                  <Text style={styles.nuviaCitation}>JNC 8 Guidelines</Text>
-                  <Text style={styles.nuviaCitation}>CMS CCM Requirements</Text>
+              {nuviaMessages.map((message) => (
+                <View
+                  key={message.id}
+                  style={message.role === 'assistant' ? styles.nuviaAssistantBubble : styles.nuviaUserBubble}
+                >
+                  <Text style={message.role === 'assistant' ? styles.nuviaBubbleText : styles.nuviaUserBubbleText}>
+                    {message.text}
+                  </Text>
+                  {message.role === 'assistant' && message.citations?.length ? (
+                    <View style={styles.nuviaCitationRow}>
+                      {message.citations.map((citation) => (
+                        <Text key={`${message.id}-${citation}`} style={styles.nuviaCitation}>{citation}</Text>
+                      ))}
+                    </View>
+                  ) : null}
                 </View>
-              </View>
-              <View style={styles.nuviaUserBubble}>
-                <Text style={styles.nuviaUserBubbleText}>
-                  {nuviaInput.trim() || 'Show me the highest-priority outreach and any billing actions I should complete first.'}
-                </Text>
-              </View>
+              ))}
+              {isNuviaThinking ? (
+                <View style={styles.nuviaAssistantBubble}>
+                  <Text style={styles.nuviaBubbleText}>Nuvia is analyzing patient signals and preparing the next action...</Text>
+                </View>
+              ) : null}
             </View>
           )}
 
@@ -1167,7 +1343,9 @@ export default function App() {
                       </View>
                       <Text style={styles.nuviaAlertTitle}>{alert.title}</Text>
                     </View>
-                    <Text style={[styles.nuviaAlertAction, { color: alert.tone }]}>{alert.action}</Text>
+                    <Pressable style={[styles.nuviaActionChip, { borderColor: `${alert.tone}55` }]} onPress={() => handleNuviaAlertAction(alert.id)}>
+                      <Text style={[styles.nuviaAlertAction, { color: alert.tone }]}>{alert.action}</Text>
+                    </Pressable>
                   </View>
                   <Text style={styles.nuviaAlertBody}>{alert.description}</Text>
                 </View>
@@ -1189,6 +1367,10 @@ export default function App() {
                     </View>
                   </View>
                   <Text style={styles.nuviaTaskMeta}>{task.meta}</Text>
+                  <Pressable style={styles.nuviaTaskActionButton} onPress={() => handleNuviaTaskAction(task.id)}>
+                    <Text style={styles.nuviaTaskActionText}>Open workflow</Text>
+                    <Ionicons name="arrow-forward" size={14} color="#ffffff" />
+                  </Pressable>
                 </View>
               ))}
             </View>
@@ -1207,7 +1389,7 @@ export default function App() {
                 />
               </View>
               {knowledgeRows.map((item) => (
-                <View key={item.id} style={styles.nuviaKnowledgeCard}>
+                <Pressable key={item.id} style={styles.nuviaKnowledgeCard} onPress={() => handleNuviaKnowledgeAction(item.id)}>
                   <View style={styles.rowBetween}>
                     <Text style={styles.nuviaKnowledgeCategory}>{item.category}</Text>
                     <Text style={styles.nuviaKnowledgeUpdated}>Updated</Text>
@@ -1219,7 +1401,11 @@ export default function App() {
                       <Text key={tag} style={styles.nuviaKnowledgeTag}>#{tag}</Text>
                     ))}
                   </View>
-                </View>
+                  <View style={styles.nuviaKnowledgeFooter}>
+                    <Text style={styles.nuviaKnowledgeAction}>Use in chat</Text>
+                    <Ionicons name="sparkles-outline" size={14} color="#34d399" />
+                  </View>
+                </Pressable>
               ))}
             </View>
           )}
@@ -1236,8 +1422,10 @@ export default function App() {
                 placeholder="Type a message or use voice command..."
                 placeholderTextColor="#6b7280"
                 style={styles.nuviaComposerInput}
+                onSubmitEditing={handleNuviaSend}
+                returnKeyType="send"
               />
-              <Pressable style={styles.nuviaSendButton}>
+              <Pressable style={[styles.nuviaSendButton, (!nuviaInput.trim() || isNuviaThinking) && styles.nuviaSendButtonDisabled]} onPress={handleNuviaSend}>
                 <Ionicons name="send" size={16} color="#ffffff" />
               </Pressable>
             </View>
@@ -4404,6 +4592,7 @@ const styles = StyleSheet.create({
   nuviaAlertCard: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', padding: 14, gap: 10 },
   nuviaAlertIcon: { width: 32, height: 32, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   nuviaAlertTitle: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
+  nuviaActionChip: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 999, borderWidth: 1, backgroundColor: 'rgba(255,255,255,0.03)' },
   nuviaAlertAction: { fontSize: 9, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
   nuviaAlertBody: { color: '#a1a1aa', fontSize: 12, lineHeight: 18 },
   nuviaTaskCard: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', padding: 14, gap: 8 },
@@ -4412,6 +4601,8 @@ const styles = StyleSheet.create({
   nuviaTaskMeta: { color: '#71717a', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 },
   nuviaTaskStatusPill: { backgroundColor: 'rgba(16,185,129,0.12)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(16,185,129,0.2)' },
   nuviaTaskStatusText: { color: '#34d399', fontSize: 8, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
+  nuviaTaskActionButton: { marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(16,185,129,0.14)', borderWidth: 1, borderColor: 'rgba(52,211,153,0.25)', borderRadius: 14, paddingVertical: 11 },
+  nuviaTaskActionText: { color: '#ffffff', fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
   nuviaSearchWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 14, paddingVertical: 12 },
   nuviaSearchInput: { flex: 1, color: '#ffffff', fontSize: 13, paddingVertical: 0 },
   nuviaKnowledgeCard: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', padding: 14, gap: 8 },
@@ -4421,12 +4612,15 @@ const styles = StyleSheet.create({
   nuviaKnowledgeBody: { color: '#a1a1aa', fontSize: 12, lineHeight: 18 },
   nuviaKnowledgeTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 2 },
   nuviaKnowledgeTag: { color: '#71717a', fontSize: 8, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
+  nuviaKnowledgeFooter: { marginTop: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  nuviaKnowledgeAction: { color: '#34d399', fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
   nuviaComposer: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)' },
   nuviaMicButton: { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   nuviaMicButtonActive: { backgroundColor: '#ef4444' },
   nuviaComposerInputWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#18181b', borderRadius: 999, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', paddingLeft: 16, paddingRight: 8, paddingVertical: 8 },
   nuviaComposerInput: { flex: 1, color: '#ffffff', fontSize: 13, paddingVertical: 0 },
   nuviaSendButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  nuviaSendButtonDisabled: { opacity: 0.45 },
   nuviaVoiceError: { color: '#f87171', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 8 },
   nuviaComposerHint: { color: '#52525b', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center', marginTop: 4 },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
