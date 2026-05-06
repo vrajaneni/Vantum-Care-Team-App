@@ -1,0 +1,9 @@
+{
+  "name": "Vantum Clinic - Provider APP",
+  "description": "AI Co-Pilot Care Journey. A high-performance clinical co-pilot for healthcare providers featuring Nuvia AI for real-time SOAP notes, RPM monitoring, and automated CMS documentation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
